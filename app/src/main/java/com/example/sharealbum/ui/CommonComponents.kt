@@ -1,6 +1,7 @@
 package com.example.sharealbum.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,11 +44,22 @@ import androidx.compose.ui.unit.dp
 fun WelcomePanel(title: String, subtitle: String) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(30.dp),
+        shape = RoundedCornerShape(26.dp),
         color = MaterialTheme.colorScheme.primary,
-        shadowElevation = 4.dp
+        shadowElevation = 10.dp
     ) {
-        Column(modifier = Modifier.padding(24.dp)) {
+        Column(
+            modifier = Modifier
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary
+                        )
+                    )
+                )
+                .padding(20.dp)
+        ) {
             Text(
                 title,
                 style = MaterialTheme.typography.headlineMedium,
@@ -67,23 +80,30 @@ fun BrandHeader(subtitle: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             modifier = Modifier
-                .size(64.dp)
-                .clip(RoundedCornerShape(22.dp))
-                .background(MaterialTheme.colorScheme.primary),
+                .size(58.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            MaterialTheme.colorScheme.primary,
+                            MaterialTheme.colorScheme.tertiary
+                        )
+                    )
+                ),
             contentAlignment = Alignment.Center
         ) {
             Box(
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(22.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.tertiary)
+                    .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f))
             )
         }
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         Text(
             "momento",
             style = MaterialTheme.typography.displaySmall,
-            color = MaterialTheme.colorScheme.primary
+            color = MaterialTheme.colorScheme.onBackground
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
@@ -102,15 +122,16 @@ fun EmptyMessage(message: String) {
             .fillMaxWidth()
             .widthIn(max = 460.dp)
             .padding(vertical = 16.dp),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 3.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
         Text(
             message,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(28.dp),
+                .padding(22.dp),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center
@@ -130,10 +151,12 @@ fun SegmentedTabs(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(20.dp),
-        color = MaterialTheme.colorScheme.secondary
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surface,
+        shadowElevation = 3.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
-        Row(modifier = Modifier.padding(5.dp)) {
+        Row(modifier = Modifier.padding(4.dp)) {
             SegmentButton(
                 label = firstLabel,
                 selected = selected == firstKey,
@@ -156,12 +179,12 @@ fun LuxePanel(maxWidth: Dp = 460.dp, content: @Composable ColumnScope.() -> Unit
         modifier = Modifier
             .fillMaxWidth()
             .widthIn(max = maxWidth),
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 2.dp,
+        shadowElevation = 5.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
     ) {
-        Column(modifier = Modifier.padding(18.dp), content = content)
+        Column(modifier = Modifier.padding(16.dp), content = content)
     }
 }
 
@@ -183,9 +206,9 @@ fun LuxeTextField(
             textAlign = if (centerText) TextAlign.Center else TextAlign.Start,
             fontWeight = if (centerText) FontWeight.SemiBold else FontWeight.Normal
         ),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f),
+            focusedContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
             unfocusedContainerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f),
             focusedBorderColor = MaterialTheme.colorScheme.tertiary,
             unfocusedBorderColor = MaterialTheme.colorScheme.outline,
@@ -206,8 +229,8 @@ fun PrimaryActionButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(18.dp),
-        contentPadding = PaddingValues(vertical = 14.dp, horizontal = 18.dp),
+        shape = RoundedCornerShape(16.dp),
+        contentPadding = PaddingValues(vertical = 12.dp, horizontal = 16.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary
@@ -230,17 +253,19 @@ fun PrimaryActionButton(
 fun SecondaryActionButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     content: @Composable RowScope.() -> Unit
 ) {
     OutlinedButton(
         onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
+        enabled = enabled,
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = MaterialTheme.colorScheme.surface,
+            containerColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f),
             contentColor = MaterialTheme.colorScheme.primary
         ),
-        contentPadding = PaddingValues(vertical = 12.dp, horizontal = 14.dp),
+        contentPadding = PaddingValues(vertical = 10.dp, horizontal = 12.dp),
         modifier = modifier,
         content = content
     )
@@ -256,16 +281,16 @@ private fun SegmentButton(
     Surface(
         onClick = onClick,
         modifier = modifier,
-        shape = RoundedCornerShape(15.dp),
-        color = if (selected) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.secondary,
-        shadowElevation = if (selected) 2.dp else 0.dp
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+        shadowElevation = if (selected) 4.dp else 0.dp
     ) {
         Text(
             label,
-            modifier = Modifier.padding(vertical = 10.dp),
+            modifier = Modifier.padding(vertical = 8.dp),
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.labelLarge,
-            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

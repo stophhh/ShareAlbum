@@ -13,6 +13,13 @@ const openAiApiKey = defineSecret("OPENAI_API_KEY");
 const REGION = "asia-northeast3";
 const CHAT_MODEL = "gpt-4o-mini";
 const EMBEDDING_MODEL = "text-embedding-3-small";
+const CALLABLE_FUNCTION_OPTIONS = {
+  region: REGION,
+  secrets: [openAiApiKey],
+  // Firebase 앱에서 호출할 수 있게 Cloud Run 앞단은 공개 호출로 열어둡니다.
+  // 실제 사용자 권한 검사는 각 함수 안의 request.auth와 앨범 멤버 검사에서 처리합니다.
+  invoker: "public" as const
+};
 
 const AnalyzePhotoSchema = z.object({
   albumId: z.string().min(1),
@@ -56,37 +63,43 @@ type PhotoCandidate = {
  * - aiEmbedding: 자연어 검색용 벡터
  */
 export const analyzePhoto = onCall(
-  {region: REGION, secrets: [openAiApiKey]},
+  CALLABLE_FUNCTION_OPTIONS,
   async (request) => {
-    assertSignedIn(request.auth?.uid);
-    const input = AnalyzePhotoSchema.parse(request.data);
-    await assertAlbumMember(input.albumId, request.auth!.uid);
+    try {
+      assertSignedIn(request.auth?.uid);
+      const input = AnalyzePhotoSchema.parse(request.data);
+      await assertAlbumMember(input.albumId, request.auth!.uid);
 
-    const openai = createOpenAI();
-    const analysis = await analyzeImage(openai, input.imageUrl);
-    const aiSearchText = [
-      analysis.caption,
-      analysis.category,
-      analysis.location,
-      analysis.tags.join(" ")
-    ].filter(Boolean).join(" ");
-    const embedding = await createEmbedding(openai, aiSearchText);
+      const openai = createOpenAI();
+      const analysis = await analyzeImage(openai, input.imageUrl);
+      const aiSearchText = [
+        analysis.caption,
+        analysis.category,
+        analysis.location,
+        analysis.tags.join(" ")
+      ].filter(Boolean).join(" ");
+      const embedding = await createEmbedding(openai, aiSearchText);
 
-    await db.collection("albums")
-      .doc(input.albumId)
-      .collection("photos")
-      .doc(input.photoId)
-      .set({
-        aiCaption: analysis.caption,
-        aiTags: analysis.tags,
-        aiCategory: analysis.category,
-        aiLocation: analysis.location,
-        aiSearchText,
-        aiEmbedding: embedding,
-        aiAnalyzedAt: Date.now()
-      }, {merge: true});
+      await db.collection("albums")
+        .doc(input.albumId)
+        .collection("photos")
+        .doc(input.photoId)
+        .set({
+          aiCaption: analysis.caption,
+          aiTags: analysis.tags,
+          aiCategory: analysis.category,
+          aiLocation: analysis.location,
+          aiSearchText,
+          aiEmbedding: embedding,
+          aiStatus: "done",
+          aiAnalyzedAt: Date.now()
+        }, {merge: true});
 
-    return {ok: true, analysis};
+      return {ok: true, analysis};
+    } catch (error) {
+      console.error("analyzePhoto failed", error);
+      throw toHttpsError(error, "사진 AI 분석에 실패했습니다.");
+    }
   }
 );
 
@@ -100,22 +113,27 @@ export const analyzePhoto = onCall(
  * 4. 태그/장소/날짜 필터와 embedding 유사도 점수를 섞어서 정렬합니다.
  */
 export const searchPhotos = onCall(
-  {region: REGION, secrets: [openAiApiKey]},
+  CALLABLE_FUNCTION_OPTIONS,
   async (request) => {
-    assertSignedIn(request.auth?.uid);
-    const input = SearchPhotosSchema.parse(request.data);
-    const openai = createOpenAI();
+    try {
+      assertSignedIn(request.auth?.uid);
+      const input = SearchPhotosSchema.parse(request.data);
+      const openai = createOpenAI();
 
-    const intent = await parseSearchIntent(openai, input.query);
-    const queryEmbedding = await createEmbedding(openai, input.query);
-    const candidates = await loadPhotoCandidates(request.auth!.uid, input.albumId);
-    const ranked = rankPhotos(candidates, queryEmbedding, intent).slice(0, 40);
+      const intent = await parseSearchIntent(openai, input.query);
+      const queryEmbedding = await createEmbedding(openai, input.query);
+      const candidates = await loadPhotoCandidates(request.auth!.uid, input.albumId);
+      const ranked = rankPhotos(candidates, queryEmbedding, intent).slice(0, 40);
 
-    return {
-      ok: true,
-      intent,
-      photos: ranked
-    };
+      return {
+        ok: true,
+        intent,
+        photos: ranked
+      };
+    } catch (error) {
+      console.error("searchPhotos failed", error);
+      throw toHttpsError(error, "AI 사진 검색에 실패했습니다.");
+    }
   }
 );
 
@@ -127,70 +145,75 @@ export const searchPhotos = onCall(
  * 새 앨범 생성까지 한 번에 수행하는 예시를 제공합니다.
  */
 export const createAlbumFromPrompt = onCall(
-  {region: REGION, secrets: [openAiApiKey]},
+  CALLABLE_FUNCTION_OPTIONS,
   async (request) => {
-    assertSignedIn(request.auth?.uid);
-    const input = CreateAlbumFromPromptSchema.parse(request.data);
-    const openai = createOpenAI();
+    try {
+      assertSignedIn(request.auth?.uid);
+      const input = CreateAlbumFromPromptSchema.parse(request.data);
+      const openai = createOpenAI();
 
-    const intent = await parseSearchIntent(openai, input.prompt);
-    const queryEmbedding = await createEmbedding(openai, input.prompt);
-    const candidates = await loadPhotoCandidates(request.auth!.uid);
-    const selectedPhotos = rankPhotos(candidates, queryEmbedding, intent).slice(0, 60);
+      const intent = await parseSearchIntent(openai, input.prompt);
+      const queryEmbedding = await createEmbedding(openai, input.prompt);
+      const candidates = await loadPhotoCandidates(request.auth!.uid);
+      const selectedPhotos = rankPhotos(candidates, queryEmbedding, intent).slice(0, 60);
 
-    if (selectedPhotos.length === 0) {
-      return {ok: false, message: "조건에 맞는 사진을 찾지 못했습니다."};
-    }
+      if (selectedPhotos.length === 0) {
+        return {ok: false, message: "조건에 맞는 사진을 찾지 못했습니다."};
+      }
 
-    const title = input.title?.trim() || intent.suggestedAlbumTitle || "AI가 모은 앨범";
-    const albumRef = db.collection("albums").doc();
-    const inviteCode = createInviteCode();
-    const batch = db.batch();
+      const title = input.title?.trim() || intent.suggestedAlbumTitle || "AI가 모은 앨범";
+      const albumRef = db.collection("albums").doc();
+      const inviteCode = createInviteCode();
+      const batch = db.batch();
 
-    batch.set(albumRef, {
-      title,
-      ownerId: request.auth!.uid,
-      ownerEmail: request.auth?.token.email || "",
-      ownerNickname: request.auth?.token.name || "",
-      memberIds: [request.auth!.uid],
-      inviteCode,
-      createdAt: Date.now(),
-      createdByAgent: true,
-      sourcePrompt: input.prompt
-    });
-
-    batch.set(db.collection("inviteCodes").doc(inviteCode), {
-      albumId: albumRef.id,
-      createdBy: request.auth!.uid,
-      createdAt: Date.now()
-    });
-
-    selectedPhotos.forEach((photo) => {
-      batch.set(albumRef.collection("photos").doc(photo.photoId), {
-        imageUrl: photo.imageUrl,
-        sourceAlbumId: photo.albumId,
-        sourcePhotoId: photo.photoId,
-        uploaderNickname: photo.albumTitle,
-        aiCaption: photo.aiCaption,
-        aiTags: photo.aiTags,
-        aiCategory: photo.aiCategory,
-        aiLocation: photo.aiLocation,
-        reactions: {},
-        commentCount: 0,
-        uploadedAt: photo.uploadedAt,
-        addedByAgent: true
+      batch.set(albumRef, {
+        title,
+        ownerId: request.auth!.uid,
+        ownerEmail: request.auth?.token.email || "",
+        ownerNickname: request.auth?.token.name || "",
+        memberIds: [request.auth!.uid],
+        inviteCode,
+        createdAt: Date.now(),
+        createdByAgent: true,
+        sourcePrompt: input.prompt
       });
-    });
 
-    await batch.commit();
+      batch.set(db.collection("inviteCodes").doc(inviteCode), {
+        albumId: albumRef.id,
+        createdBy: request.auth!.uid,
+        createdAt: Date.now()
+      });
 
-    return {
-      ok: true,
-      albumId: albumRef.id,
-      title,
-      count: selectedPhotos.length,
-      photos: selectedPhotos
-    };
+      selectedPhotos.forEach((photo) => {
+        batch.set(albumRef.collection("photos").doc(photo.photoId), {
+          imageUrl: photo.imageUrl,
+          sourceAlbumId: photo.albumId,
+          sourcePhotoId: photo.photoId,
+          uploaderNickname: photo.albumTitle,
+          aiCaption: photo.aiCaption,
+          aiTags: photo.aiTags,
+          aiCategory: photo.aiCategory,
+          aiLocation: photo.aiLocation,
+          reactions: {},
+          commentCount: 0,
+          uploadedAt: photo.uploadedAt,
+          addedByAgent: true
+        });
+      });
+
+      await batch.commit();
+
+      return {
+        ok: true,
+        albumId: albumRef.id,
+        title,
+        count: selectedPhotos.length,
+        photos: selectedPhotos
+      };
+    } catch (error) {
+      console.error("createAlbumFromPrompt failed", error);
+      throw toHttpsError(error, "AI 앨범 생성에 실패했습니다.");
+    }
   }
 );
 
@@ -202,6 +225,17 @@ function assertSignedIn(uid?: string) {
   if (!uid) {
     throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
   }
+}
+
+function toHttpsError(error: unknown, fallbackMessage: string) {
+  if (error instanceof HttpsError) return error;
+  if (error instanceof z.ZodError) {
+    return new HttpsError("invalid-argument", "요청 데이터 형식이 올바르지 않습니다.");
+  }
+  if (error instanceof Error) {
+    return new HttpsError("internal", `${fallbackMessage} ${error.message}`);
+  }
+  return new HttpsError("internal", fallbackMessage);
 }
 
 async function assertAlbumMember(albumId: string, uid: string) {

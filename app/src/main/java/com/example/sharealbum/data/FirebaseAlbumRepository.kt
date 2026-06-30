@@ -44,7 +44,9 @@ fun DocumentSnapshot.toPhoto(): Photo? {
     return Photo(
         id = id,
         imageUrl = imageUrl,
+        thumbnailUrl = getString("thumbnailUrl").orEmpty(),
         storagePath = getString("storagePath").orEmpty(),
+        thumbnailPath = getString("thumbnailPath").orEmpty(),
         uploaderId = getString("uploaderId").orEmpty(),
         uploaderEmail = getString("uploaderEmail").orEmpty(),
         uploaderNickname = getString("uploaderNickname").orEmpty(),
@@ -238,13 +240,25 @@ fun deletePhoto(
         .document(photo.id)
         .delete()
         .addOnSuccessListener {
-            if (photo.storagePath.isBlank()) {
+            val paths = listOf(photo.storagePath, photo.thumbnailPath).filter { it.isNotBlank() }.distinct()
+            if (paths.isEmpty()) {
                 onDone()
-            } else {
-                storage.reference.child(photo.storagePath)
+                return@addOnSuccessListener
+            }
+
+            var completed = 0
+            var failed = false
+            paths.forEach { path ->
+                storage.reference.child(path)
                     .delete()
-                    .addOnSuccessListener { onDone() }
-                    .addOnFailureListener { onError(it) }
+                    .addOnSuccessListener {
+                        completed += 1
+                        if (completed == paths.size && !failed) onDone()
+                    }
+                    .addOnFailureListener {
+                        failed = true
+                        onError(it)
+                    }
             }
         }
         .addOnFailureListener { onError(it) }
@@ -274,8 +288,9 @@ fun deleteAlbum(
     batch.commit()
         .addOnSuccessListener {
             photos
-                .map { it.storagePath }
+                .flatMap { listOf(it.storagePath, it.thumbnailPath) }
                 .filter { it.isNotBlank() }
+                .distinct()
                 .forEach { storagePath ->
                     storage.reference.child(storagePath).delete()
                 }

@@ -18,7 +18,9 @@ data class Album(
 data class Photo(
     val id: String,
     val imageUrl: String,
+    val thumbnailUrl: String,
     val storagePath: String,
+    val thumbnailPath: String,
     val uploaderId: String,
     val uploaderEmail: String,
     val uploaderNickname: String,
@@ -57,6 +59,18 @@ data class SavedPhoto(
     val imageUrl: String,
     val uploaderName: String,
     val savedAt: Long
+)
+
+// Cloud Functions의 searchPhotos 결과를 앱에서 보여주기 위한 모델입니다.
+data class AiPhotoResult(
+    val albumId: String,
+    val albumTitle: String,
+    val photoId: String,
+    val imageUrl: String,
+    val aiCaption: String,
+    val aiCategory: String,
+    val aiLocation: String,
+    val score: Double
 )
 
 // 로그인/회원가입, 참여/생성 탭처럼 화면 상태를 안전하게 표현하기 위한 enum입니다.
