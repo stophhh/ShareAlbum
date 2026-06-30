@@ -61,3 +61,13 @@ flowchart TD
     E --> F[OpenAI API]
     E --> C
     E --> D
+```
+
+
+## 트러블슈팅
+Cloud Functions 배포 문제
+Firebase Functions 2nd Gen 배포 중 pnpm lockfile과 Functions Framework 의존성 문제를 해결했습니다.
+OpenAI quota 문제
+OpenAI API 호출 시 insufficient_quota 오류를 확인했고, 비용 문제를 고려해 demo mode 필요성을 정리했습니다.
+사진 로딩 문제
+원본 이미지를 그리드에 직접 렌더링하면 로딩이 느려져, 앱에서 썸네일을 직접 생성해 Storage에 저장하는 방식으로 개선했습니다.
