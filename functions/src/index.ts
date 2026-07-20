@@ -13,6 +13,9 @@ const openAiApiKey = defineSecret("OPENAI_API_KEY");
 const REGION = "asia-northeast3";
 const CHAT_MODEL = "gpt-4o-mini";
 const EMBEDDING_MODEL = "text-embedding-3-small";
+// 개발 중에는 OpenAI 비용이 발생하지 않도록 데모 응답을 사용합니다.
+// 실제 AI를 테스트할 때만 false로 바꾸고 배포하면 됩니다.
+const DEMO_MODE = true;
 const CALLABLE_FUNCTION_OPTIONS = {
   region: REGION,
   secrets: [openAiApiKey],
@@ -70,15 +73,18 @@ export const analyzePhoto = onCall(
       const input = AnalyzePhotoSchema.parse(request.data);
       await assertAlbumMember(input.albumId, request.auth!.uid);
 
-      const openai = createOpenAI();
-      const analysis = await analyzeImage(openai, input.imageUrl);
+      const analysis = DEMO_MODE ?
+        createDemoAnalysis(input.imageUrl) :
+        await analyzeImage(createOpenAI(), input.imageUrl);
       const aiSearchText = [
         analysis.caption,
         analysis.category,
         analysis.location,
         analysis.tags.join(" ")
       ].filter(Boolean).join(" ");
-      const embedding = await createEmbedding(openai, aiSearchText);
+      const embedding = DEMO_MODE ?
+        createDemoEmbedding(aiSearchText) :
+        await createEmbedding(createOpenAI(), aiSearchText);
 
       await db.collection("albums")
         .doc(input.albumId)
@@ -118,10 +124,13 @@ export const searchPhotos = onCall(
     try {
       assertSignedIn(request.auth?.uid);
       const input = SearchPhotosSchema.parse(request.data);
-      const openai = createOpenAI();
 
-      const intent = await parseSearchIntent(openai, input.query);
-      const queryEmbedding = await createEmbedding(openai, input.query);
+      const intent = DEMO_MODE ?
+        parseDemoSearchIntent(input.query) :
+        await parseSearchIntent(createOpenAI(), input.query);
+      const queryEmbedding = DEMO_MODE ?
+        createDemoEmbedding(input.query) :
+        await createEmbedding(createOpenAI(), input.query);
       const candidates = await loadPhotoCandidates(request.auth!.uid, input.albumId);
       const ranked = rankPhotos(candidates, queryEmbedding, intent).slice(0, 40);
 
@@ -150,10 +159,13 @@ export const createAlbumFromPrompt = onCall(
     try {
       assertSignedIn(request.auth?.uid);
       const input = CreateAlbumFromPromptSchema.parse(request.data);
-      const openai = createOpenAI();
 
-      const intent = await parseSearchIntent(openai, input.prompt);
-      const queryEmbedding = await createEmbedding(openai, input.prompt);
+      const intent = DEMO_MODE ?
+        parseDemoSearchIntent(input.prompt) :
+        await parseSearchIntent(createOpenAI(), input.prompt);
+      const queryEmbedding = DEMO_MODE ?
+        createDemoEmbedding(input.prompt) :
+        await createEmbedding(createOpenAI(), input.prompt);
       const candidates = await loadPhotoCandidates(request.auth!.uid);
       const selectedPhotos = rankPhotos(candidates, queryEmbedding, intent).slice(0, 60);
 
@@ -219,6 +231,54 @@ export const createAlbumFromPrompt = onCall(
 
 function createOpenAI() {
   return new OpenAI({apiKey: openAiApiKey.value()});
+}
+
+function createDemoAnalysis(imageUrl: string) {
+  const loweredUrl = imageUrl.toLowerCase();
+  const tags = new Set<string>(["공유앨범", "추억", "사진"]);
+
+  if (loweredUrl.includes("dog") || loweredUrl.includes("pet")) {
+    tags.add("강아지");
+    tags.add("반려동물");
+  }
+  if (loweredUrl.includes("jeju")) {
+    tags.add("제주");
+    tags.add("여행");
+  }
+  if (loweredUrl.includes("food")) {
+    tags.add("음식");
+  }
+
+  return {
+    caption: "데모 모드에서 생성된 사진 설명입니다.",
+    tags: Array.from(tags),
+    category: tags.has("반려동물") ? "반려동물" : tags.has("음식") ? "음식" : "일상",
+    location: tags.has("제주") ? "제주" : ""
+  };
+}
+
+function parseDemoSearchIntent(query: string) {
+  const keywords = ["강아지", "반려동물", "제주", "부산", "파리", "여행", "음식", "친구"]
+    .filter((keyword) => query.includes(keyword));
+
+  return {
+    keywords,
+    location: ["제주", "부산", "파리"].find((location) => query.includes(location)) || "",
+    category: query.includes("강아지") || query.includes("반려동물") ? "반려동물" :
+      query.includes("음식") ? "음식" :
+        query.includes("여행") ? "여행" : "",
+    dateFrom: null,
+    dateTo: null,
+    suggestedAlbumTitle: keywords.length ? `${keywords[0]} 모음` : "AI가 모은 앨범"
+  };
+}
+
+function createDemoEmbedding(input: string) {
+  const embedding = Array.from({length: 16}, () => 0);
+  Array.from(input).forEach((char, index) => {
+    embedding[index % embedding.length] += char.charCodeAt(0) / 1000;
+  });
+  return embedding;
 }
 
 function assertSignedIn(uid?: string) {

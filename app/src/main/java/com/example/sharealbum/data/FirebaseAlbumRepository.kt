@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import com.example.sharealbum.model.Album
+import com.example.sharealbum.model.AgentPhotoItem
 import com.example.sharealbum.model.Photo
 import com.example.sharealbum.model.PhotoComment
 import com.example.sharealbum.model.SavedPhoto
@@ -145,6 +146,73 @@ fun recordSavedPhoto(userId: String, album: Album, photo: Photo) {
         .collection("savedPhotos")
         .document("${album.id}_${photo.id}")
         .set(data, SetOptions.merge())
+}
+
+// FastAPI가 골라준 사진 URL 목록으로 새 앨범을 만듭니다.
+// 실제 생성은 사용자가 화면에서 확인 버튼을 누른 뒤 실행되도록 Android에서 처리합니다.
+fun createAlbumFromAgentPhotos(
+    title: String,
+    sourcePrompt: String,
+    ownerId: String,
+    ownerEmail: String,
+    ownerNickname: String,
+    photos: List<AgentPhotoItem>,
+    onDone: (String) -> Unit,
+    onError: (Exception) -> Unit
+) {
+    val db = FirebaseFirestore.getInstance()
+    val albumRef = db.collection("albums").document()
+    val inviteCode = createInviteCode()
+    val now = System.currentTimeMillis()
+    val albumBatch = db.batch()
+
+    albumBatch.set(albumRef, hashMapOf(
+        "title" to title.trim().ifBlank { "AI가 모은 앨범" },
+        "ownerId" to ownerId,
+        "ownerEmail" to ownerEmail,
+        "ownerNickname" to ownerNickname,
+        "memberIds" to listOf(ownerId),
+        "inviteCode" to inviteCode,
+        "createdAt" to now,
+        "createdByAgent" to true,
+        "sourcePrompt" to sourcePrompt
+    ))
+
+    albumBatch.set(db.collection("inviteCodes").document(inviteCode), hashMapOf(
+        "albumId" to albumRef.id,
+        "createdBy" to ownerId,
+        "createdAt" to now
+    ))
+
+    albumBatch.commit()
+        .addOnSuccessListener {
+            if (photos.isEmpty()) {
+                onDone(albumRef.id)
+                return@addOnSuccessListener
+            }
+
+            val photoBatch = db.batch()
+            photos.forEach { photo ->
+                val photoRef = albumRef.collection("photos").document()
+                photoBatch.set(photoRef, hashMapOf(
+                    "imageUrl" to photo.image_url,
+                    "thumbnailUrl" to photo.image_url,
+                    "sourcePhotoId" to photo.photo_id,
+                    "uploaderId" to ownerId,
+                    "uploaderEmail" to ownerEmail,
+                    "uploaderNickname" to ownerNickname,
+                    "aiTags" to photo.tags,
+                    "reactions" to emptyMap<String, List<String>>(),
+                    "commentCount" to 0L,
+                    "uploadedAt" to now,
+                    "addedByAgent" to true
+                ))
+            }
+            photoBatch.commit()
+                .addOnSuccessListener { onDone(albumRef.id) }
+                .addOnFailureListener { onError(it) }
+        }
+        .addOnFailureListener { onError(it) }
 }
 
 // 반응은 reactions.heart 같은 배열 필드에 uid를 넣고 빼는 방식입니다.

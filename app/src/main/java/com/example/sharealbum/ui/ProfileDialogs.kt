@@ -184,12 +184,31 @@ fun MyPageScreen(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                Text("마이페이지", style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    profile.nickname,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(26.dp),
+                    color = MaterialTheme.colorScheme.secondary,
+                    tonalElevation = 1.dp
+                ) {
+                    Column(modifier = Modifier.padding(18.dp)) {
+                        Text("마이페이지", style = MaterialTheme.typography.headlineMedium)
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            profile.nickname,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            profile.email,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        TextButton(onClick = onEditProfile) {
+                            Text("프로필 수정")
+                        }
+                    }
+                }
             }
         }
 
@@ -221,10 +240,34 @@ fun MyPageScreen(
                     )
                 } else {
                     albums.take(5).forEach { album ->
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 1.dp
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    album.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "${album.memberIds.size}명 · ${if (album.ownerId == profile.uid) "앨범 주인" else "멤버"} · ${formatDate(album.createdAt)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    if (albums.size > 5) {
                         Text(
-                            album.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(vertical = 4.dp)
+                            "외 ${albums.size - 5}개 앨범에 더 참여 중입니다.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
                         )
                     }
                 }

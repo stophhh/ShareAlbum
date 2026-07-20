@@ -72,6 +72,31 @@ data class AiPhotoResult(
     val aiLocation: String,
     val score: Double
 )
+data class AgentPhotoItem(
+    val photo_id: String,
+    val image_url: String,
+    val tags: List<String>,
+    val location: String? = null,
+    val uploaded_at: String? = null
+)
+
+data class AgentCommandRequest(
+    val user_id: String,
+    val message: String,
+    val photos: List<AgentPhotoItem> = emptyList()
+)
+
+data class AgentCommandResponse(
+    val success: Boolean,
+    val intent: String,
+    val user_id: String,
+    val message: String,
+    val photo_count: Int = 0,
+    val matched_photo_count: Int = 0,
+    val photos: List<AgentPhotoItem> = emptyList(),
+    val response: String,
+    val suggested_album_title: String = ""
+)
 
 // 로그인/회원가입, 참여/생성 탭처럼 화면 상태를 안전하게 표현하기 위한 enum입니다.
 enum class AuthMode { Login, SignUp }
@@ -96,3 +121,4 @@ fun Photo.totalReactionCount(): Int {
 fun defaultNickname(email: String?): String {
     return email?.substringBefore("@")?.takeIf { it.isNotBlank() } ?: "나"
 }
+

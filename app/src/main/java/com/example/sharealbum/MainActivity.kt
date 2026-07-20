@@ -67,16 +67,13 @@ import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 import com.example.sharealbum.data.addComment
 import com.example.sharealbum.data.createInviteCode
-import com.example.sharealbum.data.createAlbumWithAi
 import com.example.sharealbum.data.deleteAlbum
 import com.example.sharealbum.data.deleteComment
 import com.example.sharealbum.data.deletePhoto
 import com.example.sharealbum.data.downloadPhoto
 import com.example.sharealbum.data.formatDate
 import com.example.sharealbum.data.recordSavedPhoto
-import com.example.sharealbum.data.requestPhotoAnalysis
 import com.example.sharealbum.data.saveUserProfile
-import com.example.sharealbum.data.searchPhotosWithAi
 import com.example.sharealbum.data.toAlbum
 import com.example.sharealbum.data.toPhoto
 import com.example.sharealbum.data.toPhotoComment
@@ -85,7 +82,6 @@ import com.example.sharealbum.data.toUserProfile
 import com.example.sharealbum.data.toggleReaction
 import com.example.sharealbum.model.Album
 import com.example.sharealbum.model.AlbumMode
-import com.example.sharealbum.model.AiPhotoResult
 import com.example.sharealbum.model.AuthMode
 import com.example.sharealbum.model.Photo
 import com.example.sharealbum.model.PhotoComment
@@ -95,11 +91,16 @@ import com.example.sharealbum.model.defaultNickname
 import com.example.sharealbum.model.displayUploader
 import com.example.sharealbum.model.reactionOptions
 import com.example.sharealbum.model.totalReactionCount
+import com.example.sharealbum.ui.AiTabContent
 import com.example.sharealbum.ui.BrandHeader
+import com.example.sharealbum.ui.BulkPhotoActionBar
 import com.example.sharealbum.ui.EmptyMessage
+import com.example.sharealbum.ui.LoadingImage
 import com.example.sharealbum.ui.LuxePanel
 import com.example.sharealbum.ui.LuxeTextField
 import com.example.sharealbum.ui.MyPageScreen
+import com.example.sharealbum.ui.PhotoCard
+import com.example.sharealbum.ui.PhotoGridCard
 import com.example.sharealbum.ui.PrimaryActionButton
 import com.example.sharealbum.ui.ProfileDialog
 import com.example.sharealbum.ui.SecondaryActionButton
@@ -262,6 +263,7 @@ fun AlbumListScreen(onLogout: () -> Unit) {
     var profile by remember { mutableStateOf(UserProfile(user.uid, defaultNickname(user.email), user.email.orEmpty())) }
     var showProfile by remember { mutableStateOf(false) }
     var showMyPage by remember { mutableStateOf(false) }
+    var albumManaging by remember { mutableStateOf<Album?>(null) }
     var savedPhotos by remember { mutableStateOf(listOf<SavedPhoto>()) }
 
     if (showMyPage) {
@@ -301,6 +303,38 @@ fun AlbumListScreen(onLogout: () -> Unit) {
         )
     }
 
+    albumManaging?.let { album ->
+        ManageAlbumDialog(
+            album = album,
+            onDismiss = { albumManaging = null },
+            onRename = { title ->
+                db.collection("albums")
+                    .document(album.id)
+                    .update("title", title)
+                    .addOnSuccessListener {
+                        albumManaging = null
+                        Toast.makeText(context, "앨범 이름을 수정했습니다.", Toast.LENGTH_SHORT).show()
+                    }
+                    .addOnFailureListener {
+                        Toast.makeText(context, "수정 실패: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
+                    }
+            },
+            onDelete = {
+                deleteAlbum(
+                    album = album,
+                    photos = emptyList(),
+                    onDone = {
+                        albumManaging = null
+                        Toast.makeText(context, "앨범을 삭제했습니다.", Toast.LENGTH_SHORT).show()
+                    },
+                    onError = {
+                        Toast.makeText(context, "앨범 삭제 실패: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        )
+    }
+
     DisposableEffect(user.uid) {
         saveUserProfile(user.uid, user.email.orEmpty(), profile.nickname)
 
@@ -326,7 +360,7 @@ fun AlbumListScreen(onLogout: () -> Unit) {
             .whereArrayContains("memberIds", user.uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Toast.makeText(context, "앨범을 불러오지 못했습니다: ${error.localizedMessage}", Toast.LENGTH_SHORT).show()
+                    // Firestore listener의 일시적인 오류는 반복 Toast로 노출하지 않고 기존 목록을 유지합니다.
                     return@addSnapshotListener
                 }
                 albums = snapshot?.documents.orEmpty()
@@ -591,6 +625,20 @@ fun AlbumListScreen(onLogout: () -> Unit) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                        if (album.ownerId == user.uid) {
+                            Surface(
+                                onClick = { albumManaging = album },
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.secondary
+                            ) {
+                                Text(
+                                    "✎",
+                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -776,10 +824,8 @@ fun AlbumDetailScreen(
     var uploadTotal by remember { mutableStateOf(0) }
     var uploadDone by remember { mutableStateOf(0) }
     var showMembers by remember { mutableStateOf(false) }
-    var aiPrompt by remember { mutableStateOf("") }
-    var aiResults by remember { mutableStateOf(listOf<AiPhotoResult>()) }
-    var isAiWorking by remember { mutableStateOf(false) }
     var showEditTitle by remember { mutableStateOf(false) }
+    var showDeleteAlbumConfirm by remember { mutableStateOf(false) }
     var selectedTab by remember(album.id) { mutableStateOf("photos") }
     var selectionMode by remember(album.id) { mutableStateOf(false) }
     var selectedPhotoIds by remember(album.id) { mutableStateOf(setOf<String>()) }
@@ -802,15 +848,9 @@ fun AlbumDetailScreen(
                 userId = user.uid,
                 userEmail = user.email.orEmpty(),
                 nickname = profile.nickname,
-                onUploaded = { photoId, imageUrl ->
-                    requestPhotoAnalysis(
-                        albumId = album.id,
-                        photoId = photoId,
-                        imageUrl = imageUrl,
-                        onError = {
-                            Toast.makeText(context, "AI 분석 실패: ${it.readableMessage()}", Toast.LENGTH_LONG).show()
-                        }
-                    )
+                onUploaded = { _, _ ->
+                    // OpenAI 비용을 쓰지 않는 개발 단계에서는 사진 분석 호출을 잠시 끕니다.
+                    // 나중에 실제 AI 분석을 켤 때 requestPhotoAnalysis(...) 호출을 다시 연결하면 됩니다.
                 },
                 onError = {
                     Toast.makeText(context, "사진 업로드 실패: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
@@ -888,6 +928,28 @@ fun AlbumDetailScreen(
         )
     }
 
+    if (showDeleteAlbumConfirm) {
+        ConfirmDeleteAlbumDialog(
+            albumTitle = currentAlbum.title,
+            onDismiss = { showDeleteAlbumConfirm = false },
+            onConfirm = {
+                deleteAlbum(
+                    album = currentAlbum,
+                    photos = photos,
+                    onDone = {
+                        showDeleteAlbumConfirm = false
+                        Toast.makeText(context, "앨범을 삭제했습니다.", Toast.LENGTH_SHORT).show()
+                        onAlbumDeleted()
+                    },
+                    onError = {
+                        showDeleteAlbumConfirm = false
+                        Toast.makeText(context, "앨범 삭제 실패: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+        )
+    }
+
     selectedPhoto?.let { photo ->
         PhotoDialog(
             albumId = album.id,
@@ -958,17 +1020,31 @@ fun AlbumDetailScreen(
                         )
                     }
                     if (isOwner) {
-                        Surface(
-                            onClick = { showEditTitle = !showEditTitle },
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.secondary
-                        ) {
-                            Text(
-                                "✎",
-                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.labelLarge
-                            )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Surface(
+                                onClick = { showEditTitle = !showEditTitle },
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.secondary
+                            ) {
+                                Text(
+                                    "✎",
+                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                            Surface(
+                                onClick = { showDeleteAlbumConfirm = true },
+                                shape = RoundedCornerShape(14.dp),
+                                color = MaterialTheme.colorScheme.surface
+                            ) {
+                                Text(
+                                    "삭제",
+                                    modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
                         }
                     }
                 }
@@ -1003,136 +1079,21 @@ fun AlbumDetailScreen(
                                     }
                             }
                         )
-                        SecondaryActionButton(
-                            onClick = {
-                                deleteAlbum(
-                                    album = currentAlbum,
-                                    photos = photos,
-                                    onDone = {
-                                        Toast.makeText(context, "앨범을 삭제했습니다.", Toast.LENGTH_SHORT).show()
-                                        onAlbumDeleted()
-                                    },
-                                    onError = {
-                                        Toast.makeText(context, "앨범 삭제 실패: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("삭제")
-                        }
                     }
                 }
             }
         }
 
         if (selectedTab == "ai") {
-        item {
-            LuxePanel(maxWidth = 640.dp) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("AI 사진 검색", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "예: 강아지 사진, 작년 제주 여행",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        "AI",
-                        modifier = Modifier
-                            .background(MaterialTheme.colorScheme.secondary, RoundedCornerShape(12.dp))
-                            .padding(horizontal = 10.dp, vertical = 5.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        style = MaterialTheme.typography.labelLarge
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-                LuxeTextField(
-                    value = aiPrompt,
-                    onValueChange = { aiPrompt = it },
-                    label = "무엇을 찾을까요?"
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    PrimaryActionButton(
-                        text = if (isAiWorking) "검색 중" else "검색",
-                        loading = isAiWorking,
-                        enabled = !isAiWorking,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            val prompt = aiPrompt.trim()
-                            if (prompt.isBlank()) return@PrimaryActionButton
-                            isAiWorking = true
-                            searchPhotosWithAi(
-                                query = prompt,
-                                albumId = album.id,
-                                onSuccess = {
-                                    aiResults = it
-                                    isAiWorking = false
-                                    Toast.makeText(context, "${it.size}장 찾았어요.", Toast.LENGTH_SHORT).show()
-                                },
-                                onError = {
-                                    isAiWorking = false
-                                    Toast.makeText(context, "AI 검색 실패: ${it.readableMessage()}", Toast.LENGTH_LONG).show()
-                                }
-                            )
-                        }
-                    )
-                    SecondaryActionButton(
-                        onClick = {
-                            val prompt = aiPrompt.trim()
-                            if (prompt.isBlank()) return@SecondaryActionButton
-                            isAiWorking = true
-                            createAlbumWithAi(
-                                prompt = prompt,
-                                onSuccess = { _, count ->
-                                    isAiWorking = false
-                                    Toast.makeText(context, "AI 앨범을 만들었어요. 사진 ${count}장", Toast.LENGTH_SHORT).show()
-                                },
-                                onError = {
-                                    isAiWorking = false
-                                    Toast.makeText(context, "AI 앨범 생성 실패: ${it.readableMessage()}", Toast.LENGTH_LONG).show()
-                                }
-                            )
-                        },
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text("앨범 생성")
-                    }
-                }
-            }
-        }
-
-        if (aiResults.isNotEmpty()) {
             item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .widthIn(max = 640.dp)
-                ) {
-                    Text("AI 검색 결과", style = MaterialTheme.typography.titleMedium)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    aiResults.chunked(2).forEach { row ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            row.forEach { result ->
-                                AiResultCard(result = result, modifier = Modifier.weight(1f))
-                            }
-                            if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                    }
-                }
+                AiTabContent(
+                    albumId = album.id,
+                    userId = user.uid,
+                    userEmail = user.email.orEmpty(),
+                    userNickname = profile.nickname,
+                    photos = photos
+                )
             }
-        }
         }
 
         if (selectedTab == "members") {
@@ -1349,250 +1310,94 @@ fun MembersDialog(
 }
 
 @Composable
-fun BulkPhotoActionBar(
-    selectionMode: Boolean,
-    selectedCount: Int,
-    onStartSelection: () -> Unit,
-    onCancel: () -> Unit,
-    onSave: () -> Unit,
-    onDelete: () -> Unit
+fun ConfirmDeleteAlbumDialog(
+    albumTitle: String,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
 ) {
-    LuxePanel(maxWidth = 640.dp) {
-        if (selectionMode) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    "${selectedCount}장 선택",
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium
-                )
-                TextButton(onClick = onCancel) {
-                    Text("취소")
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SecondaryActionButton(
-                    onClick = onSave,
-                    enabled = selectedCount > 0,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("저장")
-                }
-                SecondaryActionButton(
-                    onClick = onDelete,
-                    enabled = selectedCount > 0,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("삭제")
-                }
-            }
-        } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("사진 관리", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        "여러 장을 선택해서 저장하거나 삭제할 수 있어요.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                TextButton(onClick = onStartSelection) {
-                    Text("선택")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun LoadingImage(
-    model: Any?,
-    contentScale: ContentScale,
-    modifier: Modifier = Modifier
-) {
-    SubcomposeAsyncImage(
-        model = model,
-        contentDescription = null,
-        contentScale = contentScale,
-        modifier = modifier,
-        loading = {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f)),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(26.dp),
+        title = { Text("앨범 삭제") },
+        text = {
+            Text(
+                "'$albumTitle' 앨범을 삭제할까요? 삭제한 앨범은 되돌릴 수 없습니다.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("삭제", color = MaterialTheme.colorScheme.error)
             }
         },
-        error = {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    "이미지",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodySmall
-                )
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("취소")
             }
         }
     )
 }
 
 @Composable
-fun PhotoCard(photo: Photo, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier
-            .clickable(onClick = onClick)
-            .clip(RoundedCornerShape(18.dp)),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            LoadingImage(
-                model = photo.thumbnailUrl.ifBlank { photo.imageUrl },
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(210.dp)
-                    .clip(RoundedCornerShape(14.dp))
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        photo.displayUploader(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Text(
-                        "${formatDate(photo.uploadedAt)} · ${photo.totalReactionCount()}개 반응 · 댓글 ${photo.commentCount}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Text(
-                    "보기",
-                    color = MaterialTheme.colorScheme.primary,
-                    style = MaterialTheme.typography.labelLarge
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun PhotoGridCard(
-    photo: Photo,
-    selected: Boolean,
-    selectionMode: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+fun ManageAlbumDialog(
+    album: Album,
+    onDismiss: () -> Unit,
+    onRename: (String) -> Unit,
+    onDelete: () -> Unit
 ) {
-    Card(
-        modifier = modifier
-            .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-    ) {
-        Box {
-            LoadingImage(
-                model = photo.thumbnailUrl.ifBlank { photo.imageUrl },
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12.dp))
-            )
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(6.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
-            ) {
-                Text(
-                    "♡ ${photo.totalReactionCount()} · ${photo.commentCount}",
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+    var title by remember(album.id) { mutableStateOf(album.title) }
+    var confirmDelete by remember(album.id) { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(26.dp),
+        title = { Text("앨범 관리") },
+        text = {
+            Column {
+                LuxeTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = "앨범 이름"
                 )
-            }
-            if (selectionMode) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(7.dp),
-                    shape = CircleShape,
-                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.84f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.surface)
-                ) {
+                if (confirmDelete) {
+                    Spacer(modifier = Modifier.height(12.dp))
                     Text(
-                        if (selected) "✓" else "",
-                        modifier = Modifier.size(24.dp).padding(top = 2.dp),
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = MaterialTheme.typography.labelLarge
+                        "정말 삭제할까요? 삭제한 앨범은 되돌릴 수 없습니다.",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
             }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (confirmDelete) {
+                        onDelete()
+                    } else {
+                        val nextTitle = title.trim()
+                        if (nextTitle.isNotBlank()) onRename(nextTitle)
+                    }
+                }
+            ) {
+                Text(if (confirmDelete) "삭제 확정" else "수정")
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = {
+                        if (confirmDelete) confirmDelete = false else onDismiss()
+                    }
+                ) {
+                    Text(if (confirmDelete) "취소" else "닫기")
+                }
+                TextButton(onClick = { confirmDelete = true }) {
+                    Text("삭제", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
-    }
-}
-
-@Composable
-fun AiResultCard(result: AiPhotoResult, modifier: Modifier = Modifier) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(modifier = Modifier.padding(8.dp)) {
-            LoadingImage(
-                model = result.imageUrl,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(14.dp))
-            )
-            Spacer(modifier = Modifier.height(7.dp))
-            Text(
-                result.aiCaption.ifBlank { result.albumTitle.ifBlank { "AI 검색 결과" } },
-                maxLines = 2,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Text(
-                listOf(result.aiCategory, result.aiLocation).filter { it.isNotBlank() }.joinToString(" · "),
-                maxLines = 1,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
+    )
 }
 
 @Composable
