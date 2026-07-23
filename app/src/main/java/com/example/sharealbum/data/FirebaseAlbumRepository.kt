@@ -52,6 +52,7 @@ fun DocumentSnapshot.toPhoto(): Photo? {
         uploaderEmail = getString("uploaderEmail").orEmpty(),
         uploaderNickname = getString("uploaderNickname").orEmpty(),
         reactions = readReactions(get("reactions")),
+        savedBy = (get("savedBy") as? List<*>)?.filterIsInstance<String>().orEmpty(),
         commentCount = getLong("commentCount") ?: 0L,
         uploadedAt = getLong("uploadedAt") ?: 0L
     )
@@ -132,6 +133,7 @@ fun saveUserProfile(uid: String, email: String, nickname: String) {
 
 // "내가 저장한 사진" 기록입니다. id를 고정해 같은 사진을 여러 번 저장해도 중복되지 않게 합니다.
 fun recordSavedPhoto(userId: String, album: Album, photo: Photo) {
+    val db = FirebaseFirestore.getInstance()
     val data = hashMapOf(
         "albumId" to album.id,
         "albumTitle" to album.title,
@@ -140,12 +142,18 @@ fun recordSavedPhoto(userId: String, album: Album, photo: Photo) {
         "uploaderName" to photo.displayUploader(),
         "savedAt" to System.currentTimeMillis()
     )
-    FirebaseFirestore.getInstance()
-        .collection("users")
+
+    db.collection("users")
         .document(userId)
         .collection("savedPhotos")
         .document("${album.id}_${photo.id}")
         .set(data, SetOptions.merge())
+
+    db.collection("albums")
+        .document(album.id)
+        .collection("photos")
+        .document(photo.id)
+        .update("savedBy", FieldValue.arrayUnion(userId))
 }
 
 // FastAPI가 골라준 사진 URL 목록으로 새 앨범을 만듭니다.
@@ -203,6 +211,7 @@ fun createAlbumFromAgentPhotos(
                     "uploaderNickname" to ownerNickname,
                     "aiTags" to photo.tags,
                     "reactions" to emptyMap<String, List<String>>(),
+                    "savedBy" to emptyList<String>(),
                     "commentCount" to 0L,
                     "uploadedAt" to now,
                     "addedByAgent" to true
@@ -213,6 +222,36 @@ fun createAlbumFromAgentPhotos(
                 .addOnFailureListener { onError(it) }
         }
         .addOnFailureListener { onError(it) }
+}
+
+fun createAlbumFromSavedPhotos(
+    title: String,
+    ownerId: String,
+    ownerEmail: String,
+    ownerNickname: String,
+    savedPhotos: List<SavedPhoto>,
+    onDone: (String) -> Unit,
+    onError: (Exception) -> Unit
+) {
+    val agentPhotos = savedPhotos.map { photo ->
+        AgentPhotoItem(
+            photo_id = photo.photoId,
+            image_url = photo.imageUrl,
+            uploader_name = photo.uploaderName,
+            tags = listOf(photo.albumTitle, photo.uploaderName).filter { it.isNotBlank() }
+        )
+    }
+
+    createAlbumFromAgentPhotos(
+        title = title,
+        sourcePrompt = "마이페이지 저장 사진으로 만든 앨범",
+        ownerId = ownerId,
+        ownerEmail = ownerEmail,
+        ownerNickname = ownerNickname,
+        photos = agentPhotos,
+        onDone = onDone,
+        onError = onError
+    )
 }
 
 // 반응은 reactions.heart 같은 배열 필드에 uid를 넣고 빼는 방식입니다.

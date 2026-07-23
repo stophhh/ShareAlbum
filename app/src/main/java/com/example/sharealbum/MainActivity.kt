@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -66,6 +68,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 import com.example.sharealbum.data.addComment
+import com.example.sharealbum.data.createAlbumFromSavedPhotos
 import com.example.sharealbum.data.createInviteCode
 import com.example.sharealbum.data.deleteAlbum
 import com.example.sharealbum.data.deleteComment
@@ -115,6 +118,7 @@ import com.google.firebase.storage.FirebaseStorage
 import java.util.Locale
 import java.util.UUID
 import java.io.ByteArrayOutputStream
+import java.io.File
 import kotlin.math.max
 
 class MainActivity : ComponentActivity() {
@@ -265,6 +269,7 @@ fun AlbumListScreen(onLogout: () -> Unit) {
     var showMyPage by remember { mutableStateOf(false) }
     var albumManaging by remember { mutableStateOf<Album?>(null) }
     var savedPhotos by remember { mutableStateOf(listOf<SavedPhoto>()) }
+    var showAlbumActions by remember { mutableStateOf(false) }
 
     if (showMyPage) {
         MyPageScreen(
@@ -274,6 +279,22 @@ fun AlbumListScreen(onLogout: () -> Unit) {
             onEditProfile = {
                 showMyPage = false
                 showProfile = true
+            },
+            onCreateSavedAlbum = { title, targetPhotos ->
+                createAlbumFromSavedPhotos(
+                    title = title,
+                    ownerId = user.uid,
+                    ownerEmail = user.email.orEmpty(),
+                    ownerNickname = profile.nickname,
+                    savedPhotos = targetPhotos,
+                    onDone = {
+                        Toast.makeText(context, "'$title' 앨범을 만들었습니다.", Toast.LENGTH_SHORT).show()
+                        showMyPage = false
+                    },
+                    onError = {
+                        Toast.makeText(context, "앨범 생성 실패: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
+                    }
+                )
             },
             onBack = { showMyPage = false }
         )
@@ -410,27 +431,29 @@ fun AlbumListScreen(onLogout: () -> Unit) {
                             color = MaterialTheme.colorScheme.onBackground
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Surface(
                             onClick = { showMyPage = true },
+                            modifier = Modifier.defaultMinSize(minHeight = 44.dp),
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.secondary
                         ) {
                             Text(
-                                "마이",
-                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                "마이페이지",
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                                 color = MaterialTheme.colorScheme.primary,
                                 style = MaterialTheme.typography.labelLarge
                             )
                         }
                         Surface(
                             onClick = onLogout,
+                            modifier = Modifier.defaultMinSize(minHeight = 44.dp),
                             shape = RoundedCornerShape(14.dp),
                             color = MaterialTheme.colorScheme.surface
                         ) {
                             Text(
                                 "로그아웃",
-                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 style = MaterialTheme.typography.labelLarge
                             )
@@ -446,20 +469,55 @@ fun AlbumListScreen(onLogout: () -> Unit) {
         }
 
         item {
-            SegmentedTabs(
-                selected = mode.name,
-                firstKey = AlbumMode.Join.name,
-                firstLabel = "코드로 참여",
-                secondKey = AlbumMode.Create.name,
-                secondLabel = "앨범 만들기",
-                onSelected = { mode = AlbumMode.valueOf(it) },
+            Surface(
+                onClick = { showAlbumActions = !showAlbumActions },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 460.dp)
-            )
+                    .widthIn(max = 460.dp),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shadowElevation = 2.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text("앨범 추가", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "초대코드 참여 또는 새 앨범 만들기",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Text(
+                        if (showAlbumActions) "접기" else "열기",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
         }
 
-        if (mode == AlbumMode.Create) {
+        if (showAlbumActions) {
+            item {
+                SegmentedTabs(
+                    selected = mode.name,
+                    firstKey = AlbumMode.Join.name,
+                    firstLabel = "코드로 참여",
+                    secondKey = AlbumMode.Create.name,
+                    secondLabel = "앨범 만들기",
+                    onSelected = { mode = AlbumMode.valueOf(it) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 460.dp)
+                )
+            }
+        }
+
+        if (showAlbumActions && mode == AlbumMode.Create) {
             item {
                 LuxePanel {
                     LuxeTextField(
@@ -514,7 +572,7 @@ fun AlbumListScreen(onLogout: () -> Unit) {
                     )
                 }
             }
-        } else {
+        } else if (showAlbumActions) {
             item {
                 LuxePanel {
                     LuxeTextField(
@@ -576,15 +634,6 @@ fun AlbumListScreen(onLogout: () -> Unit) {
                     )
                 }
             }
-        }
-
-        item {
-            HorizontalDivider(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = 460.dp),
-                color = MaterialTheme.colorScheme.outline
-            )
         }
 
         if (albums.isEmpty()) {
@@ -672,7 +721,7 @@ fun AlbumBottomBar(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             BottomBarItem(label = "사진", icon = "▦", selected = selectedTab == "photos", onClick = onPhotos)
-            BottomBarItem(label = "AI", icon = "✦", selected = selectedTab == "ai", onClick = onSearch)
+            BottomBarItem(label = "정리", icon = "✦", selected = selectedTab == "ai", onClick = onSearch)
 
             Surface(
                 onClick = onUpload,
@@ -829,11 +878,11 @@ fun AlbumDetailScreen(
     var selectedTab by remember(album.id) { mutableStateOf("photos") }
     var selectionMode by remember(album.id) { mutableStateOf(false) }
     var selectedPhotoIds by remember(album.id) { mutableStateOf(setOf<String>()) }
+    var cameraImageUri by remember(album.id) { mutableStateOf<Uri?>(null) }
+    var showAddPhotoDialog by remember(album.id) { mutableStateOf(false) }
 
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents()
-    ) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+    fun uploadSelectedUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
         isUploading = true
         uploadTotal = uris.size
         uploadDone = 0
@@ -864,6 +913,29 @@ fun AlbumDetailScreen(
                 }
             )
         }
+    }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        uploadSelectedUris(uris)
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        val uri = cameraImageUri
+        if (success && uri != null) {
+            uploadSelectedUris(listOf(uri))
+        } else {
+            cameraImageUri = null
+        }
+    }
+
+    fun openCamera() {
+        val uri = createCameraImageUri(context)
+        cameraImageUri = uri
+        cameraLauncher.launch(uri)
     }
 
     DisposableEffect(album.id) {
@@ -946,6 +1018,20 @@ fun AlbumDetailScreen(
                         Toast.makeText(context, "앨범 삭제 실패: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
                     }
                 )
+            }
+        )
+    }
+
+    if (showAddPhotoDialog) {
+        AddPhotoDialog(
+            onDismiss = { showAddPhotoDialog = false },
+            onGallery = {
+                showAddPhotoDialog = false
+                launcher.launch("image/*")
+            },
+            onCamera = {
+                showAddPhotoDialog = false
+                openCamera()
             }
         )
     }
@@ -1178,7 +1264,6 @@ fun AlbumDetailScreen(
 
         item {
             Surface(
-                onClick = { if (!isUploading) launcher.launch("image/*") },
                 modifier = Modifier
                     .fillMaxWidth()
                     .widthIn(max = 640.dp),
@@ -1195,13 +1280,24 @@ fun AlbumDetailScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         Text("${uploadDone}/${uploadTotal}장 업로드 중...", color = MaterialTheme.colorScheme.primary)
                     } else {
-                        Text("+ 사진 여러 장 추가", style = MaterialTheme.typography.titleMedium)
+                        Text("사진 추가", style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "한 번에 선택하고 바로 앨범에 올릴 수 있어요.",
+                            "갤러리에서 여러 장을 고르거나, 지금 찍은 사진을 바로 올릴 수 있어요.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            PrimaryActionButton(
+                                text = "사진 추가",
+                                modifier = Modifier.weight(1f),
+                                onClick = { showAddPhotoDialog = true }
+                            )
+                        }
                     }
                 }
             }
@@ -1259,7 +1355,7 @@ fun AlbumDetailScreen(
                 clipboard.setText(AnnotatedString(currentAlbum.inviteCode))
                 Toast.makeText(context, "초대코드를 복사했습니다.", Toast.LENGTH_SHORT).show()
             },
-            onUpload = { if (!isUploading) launcher.launch("image/*") },
+            onUpload = { if (!isUploading) showAddPhotoDialog = true },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = 18.dp, vertical = 12.dp)
@@ -1328,6 +1424,47 @@ fun ConfirmDeleteAlbumDialog(
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text("삭제", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("취소")
+            }
+        }
+    )
+}
+
+@Composable
+fun AddPhotoDialog(
+    onDismiss: () -> Unit,
+    onGallery: () -> Unit,
+    onCamera: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(26.dp),
+        title = { Text("사진 추가") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "앨범에 추가할 사진 방식을 선택하세요.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    "카메라를 열었다면 휴대폰의 뒤로가기 또는 취소를 누르면 다시 앨범으로 돌아옵니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onGallery) {
+                    Text("갤러리")
+                }
+                TextButton(onClick = onCamera) {
+                    Text("카메라")
+                }
             }
         },
         dismissButton = {
@@ -1630,6 +1767,7 @@ private fun uploadPhoto(
                     "uploaderEmail" to userEmail,
                     "uploaderNickname" to nickname,
                     "reactions" to emptyMap<String, List<String>>(),
+                    "savedBy" to emptyList<String>(),
                     "commentCount" to 0L,
                     "uploadedAt" to System.currentTimeMillis(),
                     "aiStatus" to "pending"
@@ -1688,6 +1826,16 @@ private fun createThumbnailBytes(context: Context, uri: Uri): ByteArray? {
     bitmap.compress(Bitmap.CompressFormat.JPEG, 78, output)
     bitmap.recycle()
     return output.toByteArray()
+}
+
+private fun createCameraImageUri(context: Context): Uri {
+    val cameraDir = File(context.cacheDir, "camera").apply { mkdirs() }
+    val imageFile = File(cameraDir, "momento_${System.currentTimeMillis()}.jpg")
+    return FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        imageFile
+    )
 }
 
 private fun Exception.readableMessage(): String {

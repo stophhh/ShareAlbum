@@ -25,6 +25,7 @@ data class Photo(
     val uploaderEmail: String,
     val uploaderNickname: String,
     val reactions: Map<String, List<String>>,
+    val savedBy: List<String>,
     val commentCount: Long,
     val uploadedAt: Long
 )
@@ -76,8 +77,12 @@ data class AgentPhotoItem(
     val photo_id: String,
     val image_url: String,
     val tags: List<String>,
+    val uploader_id: String = "",
+    val uploader_name: String = "",
     val location: String? = null,
-    val uploaded_at: String? = null
+    val uploaded_at: String? = null,
+    val reaction_count: Int = 0,
+    val save_count: Int = 0
 )
 
 data class AgentCommandRequest(
@@ -118,7 +123,10 @@ fun Photo.totalReactionCount(): Int {
     return reactions.values.sumOf { it.size }
 }
 
+fun Photo.saveCount(): Int {
+    return savedBy.size
+}
+
 fun defaultNickname(email: String?): String {
     return email?.substringBefore("@")?.takeIf { it.isNotBlank() } ?: "나"
 }
-

@@ -48,7 +48,7 @@ service cloud.firestore {
           && request.resource.data.uploaderId == request.auth.uid;
 
         allow update: if isAlbumMember(albumId)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'commentCount']);
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions', 'commentCount', 'savedBy']);
 
         allow delete: if isAlbumOwner(albumId)
           || (isAlbumMember(albumId) && resource.data.uploaderId == request.auth.uid);

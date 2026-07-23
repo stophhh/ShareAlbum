@@ -1,0 +1,11 @@
+flowchart TD
+    A["Shared album photos"] --> B["Android builds metadata"]
+    B --> C["tags: date/season/uploader"]
+    B --> D["counts: reactions/saves"]
+    C --> E["FastAPI /agent/command"]
+    D --> E
+    E --> F["Classify intent"]
+    F --> G["Search photos"]
+    G --> H["Return matched photos"]
+    H --> I["User reviews result"]
+    I --> J["Create curated album"]

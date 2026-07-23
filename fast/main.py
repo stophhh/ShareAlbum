@@ -93,8 +93,12 @@ class PhotoItem(BaseModel):
     photo_id: str
     image_url: str
     tags: list[str] = []
+    uploader_id: str = ""
+    uploader_name: str = ""
     location: str | None = None
     uploaded_at: str | None = None
+    reaction_count: int = 0
+    save_count: int = 0
 
 
 class AgentRequest(BaseModel):
@@ -106,8 +110,8 @@ class AgentRequest(BaseModel):
 def agent_command(request: AgentRequest):
     intent = classify_intent(request.message)
     keywords = extract_keywords(request.message)
-    matched_photos = search_photos(request.message, request.photos)
-    suggested_album_title = suggest_album_title(request.message, keywords)
+    matched_photos = search_photos(request.message, request.photos, intent, request.user_id)
+    suggested_album_title = suggest_album_title(request.message, keywords, intent)
 
     return {
         "success": True,
@@ -121,7 +125,19 @@ def agent_command(request: AgentRequest):
         "response": f"'{request.message}' 요청을 {intent}로 분류했고, 사진 {len(matched_photos)}장을 찾았습니다."
     }
 
-def search_photos(message: str, photos: list[PhotoItem]):
+def search_photos(message: str, photos: list[PhotoItem], intent: str, user_id: str):
+    if is_my_photo_command(message):
+        return [photo for photo in photos if photo.uploader_id == user_id]
+
+    if intent == "SHOW_BEST_PHOTOS" or is_best_photo_command(message):
+        return search_best_photos(photos)
+
+    if intent == "SHOW_MOST_SAVED_PHOTOS" or is_most_saved_command(message):
+        return search_most_saved_photos(photos)
+
+    if intent == "SHOW_SIMILAR_CANDIDATES" or is_similar_candidate_command(message):
+        return search_similar_candidates(photos)
+
     keywords = extract_keywords(message)
     if not keywords:
         return photos if "사진" in message else []
@@ -130,6 +146,8 @@ def search_photos(message: str, photos: list[PhotoItem]):
     for photo in photos:
         searchable_text = " ".join([
             " ".join(photo.tags),
+            photo.uploader_name,
+            photo.uploader_id,
             photo.location or "",
             photo.uploaded_at or ""
         ])
@@ -137,6 +155,38 @@ def search_photos(message: str, photos: list[PhotoItem]):
             matched.append(photo)
 
     return matched
+
+
+def search_best_photos(photos: list[PhotoItem]):
+    reacted_photos = [photo for photo in photos if photo.reaction_count > 0]
+    target_photos = reacted_photos if reacted_photos else photos
+    return sorted(target_photos, key=lambda photo: photo.reaction_count, reverse=True)[:20]
+
+
+def search_most_saved_photos(photos: list[PhotoItem]):
+    saved_photos = [photo for photo in photos if photo.save_count > 0]
+    target_photos = saved_photos if saved_photos else photos
+    return sorted(target_photos, key=lambda photo: photo.save_count, reverse=True)[:20]
+
+
+def search_similar_candidates(photos: list[PhotoItem]):
+    groups: dict[str, list[PhotoItem]] = {}
+    for photo in photos:
+        key_parts = [
+            tag for tag in photo.tags
+            if "년" in tag or "월" in tag or tag in ["봄", "여름", "가을", "겨울"]
+        ][:3]
+        uploader_tags = [tag for tag in photo.tags if tag and "@" not in tag][-1:]
+        key = " ".join(key_parts + uploader_tags)
+        if key:
+            groups.setdefault(key, []).append(photo)
+
+    candidates = []
+    for group in groups.values():
+        if len(group) >= 2:
+            candidates.extend(group[:4])
+
+    return candidates[:20]
 
 
 def extract_keywords(message: str):
@@ -156,7 +206,10 @@ def extract_keywords(message: str):
     "사진", "보여줘", "보여", "띄워", "열어", "열기", "열람",
     "검색", "찾아줘", "찾아", "만", "에", "찍은", "올린",
     "앨범", "만들어줘", "만들어", "생성해줘", "생성", "모아서", "모아",
-    "올해", "작년", "이번달", "이번 달", "지난달", "지난 달"
+    "올해", "작년", "이번달", "이번 달", "지난달", "지난 달",
+    "베스트", "좋아요", "반응", "많은", "인기",
+    "저장", "저장한", "저장된", "많이", "비슷한", "중복", "후보",
+    "내가", "내", "나의", "사용자별", "멤버별", "사람별"
 ]
     normalized = message
     for word in ignored_words:
@@ -167,6 +220,15 @@ def extract_keywords(message: str):
 def classify_intent(message: str):
     if is_create_album_command(message):
         return "CREATE_ALBUM_FROM_PHOTOS"
+
+    if is_best_photo_command(message):
+        return "SHOW_BEST_PHOTOS"
+
+    if is_most_saved_command(message):
+        return "SHOW_MOST_SAVED_PHOTOS"
+
+    if is_similar_candidate_command(message):
+        return "SHOW_SIMILAR_CANDIDATES"
 
     if is_search_command(message):
         return "SHOW_PHOTOS"
@@ -187,7 +249,39 @@ def is_search_command(message: str):
     )
 
 
-def suggest_album_title(message: str, keywords: list[str]):
+def is_my_photo_command(message: str):
+    return (
+        "내가" in message or "내 사진" in message or "나의 사진" in message or "내가 올린" in message
+    )
+
+
+def is_best_photo_command(message: str):
+    return (
+        "베스트" in message or "인기" in message or "좋아요" in message or "반응 많은" in message
+    )
+
+
+def is_most_saved_command(message: str):
+    return "저장" in message and ("많" in message or "베스트" in message or "모음" in message)
+
+
+def is_similar_candidate_command(message: str):
+    return "비슷한" in message or "중복" in message
+
+
+def suggest_album_title(message: str, keywords: list[str], intent: str):
+    if is_my_photo_command(message):
+        return "내가 올린 사진 모음"
+
+    if intent == "SHOW_BEST_PHOTOS" or is_best_photo_command(message):
+        return "베스트 사진 모음"
+
+    if intent == "SHOW_MOST_SAVED_PHOTOS" or is_most_saved_command(message):
+        return "저장 많은 사진 모음"
+
+    if intent == "SHOW_SIMILAR_CANDIDATES" or is_similar_candidate_command(message):
+        return "비슷한 사진 후보"
+
     if keywords:
         return f"{keywords[0]} 사진 모음"
 

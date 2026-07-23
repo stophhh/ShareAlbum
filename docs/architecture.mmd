@@ -1,0 +1,11 @@
+flowchart TD
+    A["Android App"] --> B["Firebase Auth"]
+    A --> C["Firestore"]
+    A --> D["Firebase Storage"]
+    A --> E["FastAPI Demo Agent"]
+    E --> A
+    A --> F["Firebase Cloud Functions"]
+    F -. "later: Vision/Embedding" .-> G["OpenAI API"]
+    F --> C
+    C --> H["albums/photos/comments/savedBy"]
+    D --> I["original images/thumbnails"]

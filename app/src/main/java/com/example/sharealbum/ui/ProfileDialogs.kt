@@ -154,6 +154,7 @@ fun MyPageScreen(
     albums: List<Album>,
     savedPhotos: List<SavedPhoto>,
     onEditProfile: () -> Unit,
+    onCreateSavedAlbum: (String, List<SavedPhoto>) -> Unit,
     onBack: () -> Unit
 ) {
     LazyColumn(
@@ -280,7 +281,7 @@ fun MyPageScreen(
                     .fillMaxWidth()
                     .widthIn(max = 460.dp)
             ) {
-                Text("저장한 사진", style = MaterialTheme.typography.titleMedium)
+                Text("저장한 사진으로 앨범 만들기", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
                 if (savedPhotos.isEmpty()) {
                     Text(
@@ -288,7 +289,61 @@ fun MyPageScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                } else {
+                    savedPhotos
+                        .groupBy { it.albumId }
+                        .values
+                        .forEach { albumPhotos ->
+                            val albumTitle = albumPhotos.firstOrNull()?.albumTitle.orEmpty().ifBlank { "저장 사진" }
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            albumTitle,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            "저장한 사진 ${albumPhotos.size}장",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    TextButton(
+                                        onClick = {
+                                            onCreateSavedAlbum(
+                                                "${albumTitle} 저장 사진 모음",
+                                                albumPhotos
+                                            )
+                                        }
+                                    ) {
+                                        Text("만들기")
+                                    }
+                                }
+                            }
+                        }
                 }
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 460.dp)
+            ) {
+                Text("저장한 사진 목록", style = MaterialTheme.typography.titleMedium)
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
 
