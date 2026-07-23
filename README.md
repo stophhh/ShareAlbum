@@ -267,6 +267,59 @@ Firestore Security Rules restrict access based on authentication, album membersh
 - Photo deletion is limited to the album owner or the original uploader.
 - Reactions, comment counts, and saved-user data are the only mutable photo interaction fields.
 
+## Engineering Notes
+
+### Photo Grid Loading
+
+Rendering original images directly in the grid caused slow loading and poor scrolling performance when an album contained multiple photos.
+
+To improve perceived performance, the upload flow now creates a thumbnail image in addition to the original image. The grid uses `thumbnailUrl`, while the detail view loads the original `imageUrl`.
+
+### Android and FastAPI Local Connection
+
+The Android app and FastAPI server run in different network contexts during development. A `localhost` address inside an emulator or device does not always point to the development machine.
+
+The project supports two common development approaches:
+
+- Use the emulator host address such as `10.0.2.2`
+- Forward the device port with `adb reverse tcp:8000 tcp:8000`
+
+This keeps the Android app, Retrofit API layer, and FastAPI server testable before deploying the backend.
+
+### Search Result Album Creation
+
+Creating an album document and its photo documents in a single Firestore batch can conflict with security rules that check album membership before allowing photo creation.
+
+To avoid this, curated album creation is split into two steps:
+
+1. Create the album and invite code documents.
+2. After the album exists, create photo documents under the new album.
+
+This keeps the write flow compatible with membership-based Firestore Security Rules.
+
+### Save-Based Curation Rules
+
+The app uses `savedBy` to support frequently saved photo curation. Since this field is stored on the photo document, the security rules needed to allow album members to update only specific interaction fields.
+
+The update rule allows changes to `reactions`, `commentCount`, and `savedBy`, while preventing arbitrary photo metadata updates.
+
+### Camera Capture Upload
+
+Camera capture requires a safe URI that can be shared with the camera app. The project uses `FileProvider` to create a temporary image URI, then passes that URI into the existing upload pipeline.
+
+This avoids duplicating upload logic and keeps gallery upload and camera upload behavior consistent.
+
+### MainActivity Refactoring
+
+The initial screen logic became difficult to maintain as album management, photo grid, comments, reactions, smart search, and profile screens grew.
+
+The UI was separated into focused files:
+
+- `AiTab.kt` for smart search and curation
+- `PhotoComponents.kt` for photo grid and image components
+- `CommonComponents.kt` for shared UI elements
+- `ProfileDialogs.kt` for profile and My Page screens
+
 ## Future Improvements
 
 - Server deployment for FastAPI
